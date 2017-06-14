@@ -6,9 +6,8 @@ from jira.exceptions import JIRAError
 
 #Used to create and updatedExcel spreadsheets
 import openpyxl
-from openpyxl import Workbook
-from openpyxl.styles import Border, Side, Font, Alignment, PatternFill
-from openpyxl.cell import get_column_letter, column_index_from_string
+##from openpyxl.styles import Border, Side, Font, Alignment, PatternFill
+##from openpyxl.cell import get_column_letter, column_index_from_string
 
 #For password input
 import getpass
@@ -103,7 +102,9 @@ in multiple batches. This means no longer limited by 1000 issue limit.
 
 
 1.3
-    REWORKING
+    Major Changes. Report writing now more flexible.
+    Results now also held as list of dictionaries (in addtion to list
+    of Jira issue objects).
 
     (1) Better handling of multiple projects
         - Removed self.project attribute from from JiraComm
@@ -124,11 +125,7 @@ in multiple batches. This means no longer limited by 1000 issue limit.
 
         Not changed - self.field_mapping and reprocess_mapping
 
-    Added ExcelSheet class (copied from hub checking script)
-
-
-To do - could add exception handling to parts of JiraComm.report() that write
-values to spreadsheet, so invalid data types handled better.
+        Added ExcelSheet class (copied from hub checking script)
 """
 
 def multi_getattr(obj, attr, default = None):
@@ -169,6 +166,8 @@ class JiraComm:
         reprocess_mapping - optional dictionary for mapping results fields with functions that
                             reprocess the result. Key is column name from field_mapping.
                             Value is function from self.reprocess
+        excel_file_start - optional beggining of excel filename for results file
+                            (end of filename, includes date/time is automatic)
     """
     def __init__(self, username, password, folder="Results",
                 field_mapping="", reprocess_mapping={}, excel_file_start="Results"):
@@ -183,12 +182,11 @@ class JiraComm:
         #Full path to the Excel file
         self.excel_file = os.path.join(self.results_folder, self.excel_filename)
         #create ExcelSheet object using the above
-        self.excel = ExcelSheet(filename=self.excel_file, newfile=True)
+        self.excel = ExcelSheet(filename=self.excel_file, newfile=True, tabrename="Info")
 
-        # Report conent defined a list of tuples (list of lists would work too)
-        # Ordering of tuples here defines column position in spreadsheet (1st. "A", 2nd "B")
-        # Each tuple contains 3 strings e.g.  ("Bug Status","status","fields.status.name"):
-        #   1st [0] - meaningful name/spreadsheet column heading to give to the item
+        # Extracted details defined a list of tuples (list of lists would work too)
+        #   1st [0] - meaningful name/spreadsheet column heading to give to the item.
+        #               should be unique
         #   2nd [1] - the official Jira name of the issue field to be retrieved, e.g. "status".
         #           Used to specify details retrieved.
         #   3rd [2] - the corresponding attribute of the returned issue object
@@ -223,7 +221,7 @@ class JiraComm:
         #Holds retrieved Jira issue objects
         self.issues = []
 
-        #Holds results extracted from Jira issue objects
+        #Holds results extracted from Jira issue objects (should be easier to handle than self.issues)
         self.extracted_results = []
 
         #Holds some details of most recent run (time run, project code, project name)
@@ -231,7 +229,7 @@ class JiraComm:
         self.latest_proj_code = ""
         self.latest_proj_name = ""
 
-        #Define reprocessing
+        #Define reprocessing (functions used to transform specified elements)
         self.define_reprocess_fns()
         self.reprocess_mapping = reprocess_mapping
 
@@ -263,10 +261,13 @@ class JiraComm:
         reprocess_mapping they will be automatically applied by self.issue_details()
         """
         self.reprocess = {}
+
         #Re-arrange Jira date to nicer format (uses date_remformat method)
         self.reprocess["date fix"] = self.date_reformat
+
         #Originally created to concatenate component names into comma-separated string
         self.reprocess["name concat"] = lambda field: ",".join([e.name for e in field])
+
         #Latest comment
         ##self.reprocess["latest comment"] = lambda comments: "["+comments[-1].author.displayName + ", "+self.date_reformat(comments[-1].updated) + "] "+comments[-1].body
         def temp(comments):
@@ -324,7 +325,7 @@ class JiraComm:
         #Set the project but abandon if user cannot access it.
         if project in self.projects:
             search_string = "project="+project
-            print ">>",search_string
+            print "***",search_string,"***"
         else:
             print "User has no access to project:",project
             keep_going = False
@@ -387,7 +388,7 @@ class JiraComm:
         #Holds comments
         comments = []
 
-        #PAH issue sometimes lacks fields.comment attribute even when actually
+        #NB issue sometimes lacks fields.comment attribute even when actually
         #present in Jira. Seems to be problem with jira.search_issue
         #Can get from individual issue using JIRA.jira.issue() when absent from main search
         if get_now:
@@ -413,17 +414,15 @@ class JiraComm:
                     comments.append(temp_dict)
         return comments
 
-
     def issue_details(self, issue):
         """Extract details associated with Jira issue object and return as
         dictionary.
         If an item is mapped to a function in self.reprocess_mapping, the
         selected value will be automatically transformed by the chosen
         function.
-
         Args:
             issue - Jira issue object
-        Returns;
+        Returns:
             dictionary containing details
         """
         #Extract details from the issue and store in dictionary, "details"
@@ -457,7 +456,7 @@ class JiraComm:
             self.extracted_results.append(details)
 
     def report(self, results="", headings="", tab="Results", title="", left_col=1, top_row=1):
-        """Writes results to spreadsheet
+        """Writes details of Jira issues to spreadsheet
 
         Args:
             results: list of Jira results objects to write to spreadsheet.
@@ -474,10 +473,10 @@ class JiraComm:
         if tab not in self.excel.wb.sheetnames:
             self.excel.add_tab(tab)
 
-        #Get column number from letter
+        #Get column number from letter (not currently used)
         ##column = openpyxl.cell.column_index_from_string(col_letter)
 
-        #Default results to all of them
+        #Default set of results to all of them
         if not results:
             results = self.extracted_results
 
@@ -504,153 +503,15 @@ class JiraComm:
                     value = ""
                     print key,"not found in results."
                 #Change None or [] to empty string
-                if type(value) in (None,list):
+                if type(value) in (None, list):
                     value = ""
                 #Write issue to spreadsheet
                 self.excel.cell_set(ws_id=tab, row=2+top_row+r,
                             column=left_col+k, value=value, border=True)
 
-
-    def old_report(self,col_widths={},filename_start="JiraReport_",open_statuses=["New Bug","Investigate/Fix","In Test","Failed"]):
-        """Creates spreadsheet holding report of issues in project set in
-        self.project. Filename is automatic and includes time/date
-
-        Args:
-            col_widths - optional dictionary of column widths, e.g. {"A":10,"B":11,"C":6}
-            filename_start - optional start of filename given to generated excel report.
-            (end of filename is automatic and contains date/time)
-            open_satuses - list of statuses considered "open", e.g. ["New Bug","Investigate/Fix","In Test","Failed"]
-                            Used to filter results on "Open Statuses" tab. Only bugs with statuses
-                            specified here will be included on this tab.
-        Returns:
-                filename of spreadsheet
-        """
-        #Issue details included in report, in desired order. Need to be
-        #from dictionary keys defined self.field_mapping
-
-        #Spreadsheet column headings taken from self.filed_mapping
-        headings = [e[0] for e in self.field_mapping]
-        #headings = ["ID","Issue Type","Summary","Sprint","Type","Components","Priority","Status","Assignee","Reporter","Date Created","Date Updated","Resolution","Description","Environment","Severity","Latest Comment"]
-
-        #Get latest details from Jira (uses field names from self.field_mapping). fields as comma-separated string
-        fields = ",".join([e[1] for e in self.field_mapping])
-        ##fields = "key,issuetype,summary,components,priority,status,assignee,reporter,created,updated,resolution,description,customfield_10101,customfield_10405,comment,customfield_10003,customfield_11100"
-        self.get_project_issues(fields = fields)
-
-        #Spreadsheet row where column headings written, rest of report below this
-        heading_row = 3
-
-        #Define cell border style for spreadsheet
-        thin_border = Border(left=Side(style='thin'),
-                     right=Side(style='thin'),
-                     top=Side(style='thin'),
-                     bottom=Side(style='thin'))
-        #Define a fill colours  for the spreadsheet(colours alpha,r,g,b)
-        fill_colours=[]
-        fill_colours.append(PatternFill(start_color='FF99BBFF',end_color='FF99BBFF',fill_type='solid'))
-        fill_colours.append(PatternFill(start_color='FFFFBB99',end_color='FFFFBB99',fill_type='solid'))
-
-        #Create new spreadsheet
-        spreadsheet = Workbook()
-        #Select active tab
-        sheet_al = spreadsheet.active
-        #Rename the tab
-        sheet_al.title = "All Bugs"
-        #Create another tab for open bugs
-        sheet_op = spreadsheet.create_sheet(title="Open Bugs")
-
-        #Set some column widths
-        #col_widths = {"A":9,"B":11,"C":32,"D":23,"E":17,"F":14,"G":14,"H":14,"I":14,"J":14,"K":17,"L":17,"N":64,"O":15,"Q":64}
-        for col,width in col_widths.iteritems():
-            sheet_al.column_dimensions[col].width = width#All Bugs
-            sheet_op.column_dimensions[col].width = width#Open Bugs
-
-        #Add title information to All Bugs tab
-        sheet_al.cell(row=1,column=1).font = Font(bold=True)
-        sheet_al.cell(row=1,column=1).value = "Jira All Issue Report for "+self.project+" - "+self.project_name
-        sheet_al.cell(row=2,column=1).value = time.strftime("Created: %d/%m/%Y (%H:%M:%S)")
-        sheet_al.cell(row=2,column=5).value = "Number of bugs raised: "+str(len(self.issues))
-        #Add auto filter to each tab (range needs to be sting of "A1:C1" type)
-        filter_range = get_column_letter(1)+str(heading_row)+":"+get_column_letter(0+len(headings))+str(heading_row)
-        sheet_al.auto_filter.ref = filter_range
-        sheet_op.auto_filter.ref = filter_range
-
-        #Add title information to All Bugs tab
-        sheet_op.cell(row=1,column=1).font = Font(bold=True)
-        sheet_op.cell(row=1,column=1).value = "Jira Open Issue Report for "+self.project+" - "+self.project_name
-        sheet_op.cell(row=2,column=1).value = time.strftime("Created: %d/%m/%Y (%H:%M:%S)")
-        sheet_op.cell(row=2,column=5).value = "Number of bugs raised: "+str(len(self.issues))
-
-        #Add column headings to each tab
-        for k,key in enumerate(headings):
-            for sn,sheet in enumerate([sheet_al,sheet_op]):
-                cell = sheet.cell(row=heading_row,column=1+k)
-                #Set value
-                cell.value = key
-                #Make bold
-                cell.font = Font(bold=True)
-                #add border
-                cell.border = thin_border
-                #Add background colour
-                cell.fill = fill_colours[sn]
-
-        #Row positions for writing data to each tab in spreadsheet
-        al_row = heading_row+1
-        op_row = heading_row+1
-
-        #Add row data to all results tab for each issue
-        for r,issue in enumerate(self.issues):
-            print "Processing issue",issue.key
-            #Get details and write to columns
-            details = self.issue_details(issue)
-            for k,key in enumerate(headings):
-                ##print details[key]
-                #In case key is invalid, check it's present
-                if key in details:
-                    value = details[key]
-                else:
-                    value = ""
-                    print key,"not found in details."
-                #Change None or [] to empty string
-                if type(value) in (None,list):
-                    value = ""
-                #Write issue to all issues tab
-                cell = sheet_al.cell(row = al_row, column=1+k)
-                #Set smaller font in comment column
-                if key=="Latest Comment":cell.font = Font(size=8)
-                ##print "K",key,"V",value
-                cell.value = value
-                cell.border = thin_border
-                #Write open issue to open issues tab if issue open
-                if details["Status"] in open_statuses:
-                    cell = sheet_op.cell(row = op_row, column=1+k)
-                    #Set smaller font in comment column
-                    if key=="Latest Comment":cell.font = Font(size=8)
-                    cell.value = value
-                    cell.border = thin_border
-            #Advance the current row for each tab
-            al_row = al_row + 1
-            if details["Status"] in open_statuses:
-                op_row = op_row + 1
-
-        #Add number of open bugs to open bugs tab
-        sheet_op.cell(row=2,column=7).value = "Number of open bugs: "+str(op_row-heading_row-1)
-
-        #Set results folder and create it if it doesn't exist
-        results_folder = os.path.join(os.getcwd(),self.results_folder)
-        #Create the folder if it doesn't exist
-        if not os.path.exists(results_folder):
-            os.makedirs(results_folder)
-
-        #Save the spreadsheet
-        result_filename = filename_start+time.strftime("_%d_%m_%Y(%H.%M.%S).xlsx")
-        results_file = os.path.join(results_folder,result_filename)
-        spreadsheet.save(filename=results_file)
-        return result_filename
-
     def date_reformat(self,jdate):
         """Dates from Jira are strings such as '2016-03-11T15:32:28.000+0000'
-        This method converts date into more human friendly format, eg:
+        This method converts date into more human-friendly format, eg:
         11-03-2016 15:32:28
         args:
             jdate - date in string format from jira
@@ -674,7 +535,10 @@ class JiraComm:
             print f+": ", getattr(issue.fields,f)
 
     def show_issues(self):
-        """Prints details of currently retrieved issues."""
+        """Simple way of printing details of currently retrieved issues.
+
+        Setup for K008
+        """
         for i in self.issues:
             print ""
             print "==========="
@@ -806,7 +670,6 @@ class ExcelSheet:
                 print "ExcelSheet.select_ws() Sheet not selected because name '%s' not present." % (id)
         return ws
 
-
     def cell_set(self, ws_id, row, column, value, bold=False, border=False, colour="FF000000", fi=None):
         """Sets value of cell with optional border or styling
         Args:
@@ -858,7 +721,7 @@ class ExcelSheet:
             for i, width in enumerate(widths):
                 ws.column_dimensions[openpyxl.cell.get_column_letter(i+1)].width = width
 
-    def table_headings(self,tab,row,column,headings,fill=True,filter_on=False):
+    def table_headings(self, tab, row, column, headings, fill=True, filter_on=False):
         """Adds table headings to spreadsheet
 
         Args:
@@ -886,7 +749,6 @@ class ExcelSheet:
 
     def table_values(self,tab,row,column,data):
         """Adds grid of values to spreadsheet
-
         Args:
             tab - tab name
             row - row number for headings
@@ -940,8 +802,6 @@ class ExcelSheet:
 
 
 
-
-
 #Automatically executes if script is run directly but not if script imported as module
 if __name__=="__main__":
 
@@ -966,13 +826,13 @@ if __name__=="__main__":
     #("Issue Status","status","fields.status.name")
     field_mapping = [
     ("ID","key","key"),
-    ("Issue Type","issuetype","fields.issuetype.name"),
     ("Summary","summary","fields.summary"),
+    ("Status","status","fields.status.name"),
+    ("Issue Type","issuetype","fields.issuetype.name"),
     ("Sprint","customfield_10003","fields.customfield_10003"),
     ("Type","customfield_11100","fields.customfield_11100.value"),
     ("Components","components","fields.components"),
     ("Priority","priority","fields.priority.name"),
-    ("Status","status","fields.status.name"),
     ("Assignee","assignee","fields.assignee.displayName"),
     ("Reporter","reporter","fields.reporter.displayName"),
     ("Date Created","created","fields.created"),
@@ -1001,7 +861,7 @@ if __name__=="__main__":
     open_statuses = ["New Bug", "Investigate/Fix", "In Test", "Failed"]
 
     #Column widths for spreadsheet
-    col_widths = {"A":9,"B":11,"C":32,"D":23,"E":17,"F":14,"G":14,"H":14,"I":14,"J":14,"K":17,"L":17,"N":64,"O":15,"Q":64}
+    col_widths = {"A":9,"B":32,"C":23,"D":11,"E":17,"F":14,"G":14,"H":14,"I":14,"J":14,"K":17,"L":17,"N":64,"O":15,"Q":64}
 
     #Make connection to Jira
     go = JiraComm(username=username, password=password, folder="Results",
@@ -1014,7 +874,7 @@ if __name__=="__main__":
         go.get_project_issues(project='K008')
         #Write "All Bugs"
         #Write all to spreadsheet (defaults to all, so need for results argument)
-        go.report(top_row=4, left_col=1, tab="All Bugs", title="All Bugs")
+        go.report(top_row=3, left_col=1, tab="All Bugs", title="All Bugs")
         #Adjust widths
         go.excel.update_col_widths(tab="All Bugs",widths=col_widths)
 
@@ -1022,7 +882,7 @@ if __name__=="__main__":
         #Find subset of results that are open
         open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
         #Write open bugs to spreadsheeet
-        go.report(results=open_bugs, top_row=4, left_col=1, tab="Open Bugs", title="Open Bugs")
+        go.report(results=open_bugs, top_row=3, left_col=1, tab="Open Bugs", title="Open Bugs")
         go.excel.update_col_widths(tab="Open Bugs", widths=col_widths)
 
         #Open bugs by applications
@@ -1035,14 +895,23 @@ if __name__=="__main__":
         #Write results for each component
         for component in components:
             bugs = [result  for result in open_bugs if result["Components"]==component]
-            go.report(results=bugs, top_row=4+row_offset, left_col=1, tab="Open Bugs by Item", title="Open Bugs by Item")
+            go.report(results=bugs, top_row=3+row_offset, left_col=1, tab="Open Bugs by Item", title="Open Bugs by Item")
             row_offset = row_offset + len(bugs) +3
         go.excel.update_col_widths(tab="Open Bugs by Item", widths=col_widths)
 
         #Add BAU bugs - comments are stored differently!
         go.get_project_issues(project='DEVTEST')
-        go.report(top_row=4, left_col=1, tab="Devtest", title="Devtest")
+        go.report(top_row=3, left_col=1, tab="Devtest", title="Devtest")
         go.excel.update_col_widths(tab="Devtest", widths=col_widths)
+
+        #Add some hyperlinks to Info tab
+        go.excel.cell_set(ws_id="Info", row=1, column=1, value="Contents", bold=True)
+        ws = go.excel.wb["Info"]
+        for ti, tab in enumerate(go.excel.wb.worksheets):
+            cell =  ws.cell(row=3+ti, column=1)
+            cell.value = tab.title
+            link = "#'" + tab.title + "'!A1"
+            cell.hyperlink = (link)
 
         #Save spreadsheet
         go.excel.save()
