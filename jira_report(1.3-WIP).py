@@ -3,21 +3,14 @@
 #Used to access Jira
 from jira import JIRA
 from jira.exceptions import JIRAError
-
 #Used to create and updatedExcel spreadsheets
 import openpyxl
-##from openpyxl.styles import Border, Side, Font, Alignment, PatternFill
-##from openpyxl.cell import get_column_letter, column_index_from_string
-
 #For password input
 import getpass
-
 #Generally usefull
 import time
-
 #Used with getattr to read nested attributes from values in string
 import functools
-
 #Used to create sub-folder
 import os
 
@@ -809,11 +802,8 @@ if __name__=="__main__":
     username = raw_input("Jira username?")
     password = getpass.getpass("Jira Password?")
 
-    #Jira Project Code
-    project = 'K008'
-
     #Spreadsheet filename start (end automatic, includes date/time)
-    filename_start =  'ZZZ_Jira_Bugs'
+    filename_start =  'RC_Jira_Bugs'
 
     #Jira field mapping
     #List of 3-item tuples in desired spreadsheet column order.
@@ -870,20 +860,51 @@ if __name__=="__main__":
 
     #If connection successful, do stuff
     if go.jira:
-        #Get all bugs for project
-        go.get_project_issues(project='K008')
+
+        #Get all bugs for Gold Build Project
+        go.get_project_issues(project='GB')
         #Write "All Bugs"
         #Write all to spreadsheet (defaults to all, so need for results argument)
-        go.report(top_row=3, left_col=1, tab="All Bugs", title="All Bugs")
+        go.report(top_row=3, left_col=1, tab="All GB Bugs", title="All Gold Build Bugs")
         #Adjust widths
-        go.excel.update_col_widths(tab="All Bugs",widths=col_widths)
+        go.excel.update_col_widths(tab="All GB Bugs",widths=col_widths)
 
         #Write "Open Bugs"
         #Find subset of results that are open
         open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
         #Write open bugs to spreadsheeet
-        go.report(results=open_bugs, top_row=3, left_col=1, tab="Open Bugs", title="Open Bugs")
-        go.excel.update_col_widths(tab="Open Bugs", widths=col_widths)
+        go.report(results=open_bugs, top_row=3, left_col=1, tab="Open GB Bugs", title="Open Gold Build Bugs")
+        go.excel.update_col_widths(tab="Open GB Bugs", widths=col_widths)
+
+        #Open bugs by application
+        #Find components aassociated with open bugs
+        components = [result["Components"]  for result in open_bugs]
+        components = list(set(components))#only want unique values
+        components.sort()
+        #Create sepearate table for each one
+        row_offset = 0
+        #Write results for each component
+        for component in components:
+            bugs = [result  for result in open_bugs if result["Components"]==component]
+            go.report(results=bugs, top_row=3+row_offset, left_col=1, tab="Open GB Bugs by Item", title="Open GB Bugs by Item")
+            row_offset = row_offset + len(bugs) +3
+        go.excel.update_col_widths(tab="Open GB Bugs by Item", widths=col_widths)
+
+
+        #Get all bugs for project K0008
+        go.get_project_issues(project='K008')
+        #Write "All Bugs"
+        #Write all to spreadsheet (defaults to all, so need for results argument)
+        go.report(top_row=3, left_col=1, tab="All SB Bugs", title="All Silver Build Bugs")
+        #Adjust widths
+        go.excel.update_col_widths(tab="All SB Bugs",widths=col_widths)
+
+        #Write "Open Bugs"
+        #Find subset of results that are open
+        open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
+        #Write open bugs to spreadsheeet
+        go.report(results=open_bugs, top_row=3, left_col=1, tab="Open SB Bugs", title="Open Silver Build Bugs")
+        go.excel.update_col_widths(tab="Open SB Bugs", widths=col_widths)
 
         #Open bugs by applications
         #Find components aassociated with open bugs
@@ -895,23 +916,42 @@ if __name__=="__main__":
         #Write results for each component
         for component in components:
             bugs = [result  for result in open_bugs if result["Components"]==component]
-            go.report(results=bugs, top_row=3+row_offset, left_col=1, tab="Open Bugs by Item", title="Open Bugs by Item")
+            go.report(results=bugs, top_row=3+row_offset, left_col=1, tab="Open SB Bugs by Item", title="Open Bugs by Item")
             row_offset = row_offset + len(bugs) +3
-        go.excel.update_col_widths(tab="Open Bugs by Item", widths=col_widths)
+        go.excel.update_col_widths(tab="Open SB Bugs by Item", widths=col_widths)
 
-        #Add BAU bugs - comments are stored differently!
+        #Priority counts
+        go.excel.cell_set(ws_id='Info',row=2,column=4,value="K008")
+        go.excel.table_headings(tab="Info", row=3, column=4,headings=["Priority", "Count"])
+        for pi, priority in enumerate(["P1 V. High", "P2 High", "P3 Medium", "P4 Low", "P5 V. Low"]):
+            things = [result for result in open_bugs if result["Priority"]==priority]
+            count = len(things)
+            go.excel.cell_set(ws_id='Info',row=4+pi,column=4,border=True,value=priority)
+            go.excel.cell_set(ws_id='Info',row=4+pi,column=5,border=True,value=count)
+
+
+
+        #Add BAU bugs
         go.get_project_issues(project='DEVTEST')
         go.report(top_row=3, left_col=1, tab="Devtest", title="Devtest")
         go.excel.update_col_widths(tab="Devtest", widths=col_widths)
+
 
         #Add some hyperlinks to Info tab
         go.excel.cell_set(ws_id="Info", row=1, column=1, value="Contents", bold=True)
         ws = go.excel.wb["Info"]
         for ti, tab in enumerate(go.excel.wb.worksheets):
-            cell =  ws.cell(row=3+ti, column=1)
-            cell.value = tab.title
-            link = "#'" + tab.title + "'!A1"
-            cell.hyperlink = (link)
+            #Exclude Info tab
+            if tab.title!="Info":
+                #Add hyperlinks to Info tab
+                cell =  ws.cell(row=2+ti, column=1)
+                cell.value = tab.title
+                link = "#'" + tab.title + "'!A1"
+                cell.hyperlink = (link)
+                #Add contents link to other tabs
+                cell = tab.cell(row=1, column=1)
+                cell.hyperlink = ("#Info!A1")
+                cell.value = ("Link to Contents")
 
         #Save spreadsheet
         go.excel.save()
