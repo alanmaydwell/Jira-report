@@ -853,7 +853,8 @@ if __name__=="__main__":
     }
 
     # Statuses of bugs included in "Open Bugs" tab of spreadsheet
-    open_statuses = ["New Bug", "Investigate/Fix", "In Test", "Failed"]
+    open_statuses_rc = ["New Bug", "Investigate/Fix", "In Test", "Failed"]
+    open_statuses_devtest = ["Triage","Work in Progress","Information Requested"]
 
     #Column widths for spreadsheet
     col_widths = {"A":9,"B":32,"C":23,"D":11,"E":17,"F":14,"G":14,"H":14,"I":14,"J":14,"K":17,"L":17,"N":64,"O":15,"Q":64}
@@ -873,6 +874,12 @@ if __name__=="__main__":
             #Write "All Bugs"
             tab = "All "+project+" Bugs"
             go.report(top_row=3, left_col=1, tab=tab, title=tab, column_widths=col_widths)
+
+            #Set "open statuses" list based on project
+            if project=="DEVTEST":
+                open_statuses = open_statuses_devtest
+            else:
+                open_statuses = open_statuses_rc
 
             #Write "Open Bugs"
             open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
