@@ -924,10 +924,12 @@ if __name__=="__main__":
                 cell.value = tab.title
                 link = "#'" + tab.title + "'!A1"
                 cell.hyperlink = (link)
+                cell.font = openpyxl.styles.Font(color="FF0055FF")#Blue
                 #Add contents link to other tabs
                 cell = tab.cell(row=1, column=1)
                 cell.hyperlink = ("#Info!A1")
                 cell.value = ("Link to Contents")
+                cell.font = openpyxl.styles.Font(color="FF0055FF")#Blue
 
         #Save spreadsheet
         go.excel.save()
