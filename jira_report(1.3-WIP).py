@@ -448,7 +448,7 @@ class JiraComm:
             details = self.issue_details(issue)
             self.extracted_results.append(details)
 
-    def report(self, results="", headings="", tab="Results", title="", left_col=1, top_row=1):
+    def report(self, results="", headings="", tab="Results", title="", left_col=1, top_row=1, column_widths=""):
         """Writes details of Jira issues to spreadsheet
 
         Args:
@@ -461,6 +461,8 @@ class JiraComm:
             tab: name of spreadsheet tab to write to (will be created if not already present)
             left_col : column number of leftmost boundary of area to write to
             top_row - topmost row to write from
+            column_widths - optional columns width values for spreadsheet. Either
+                as dictionary {"A":15,"B":9,"C":15} or list [1,2,3]
         """
         #Create tab if it's not already present
         if tab not in self.excel.wb.sheetnames:
@@ -501,6 +503,9 @@ class JiraComm:
                 #Write issue to spreadsheet
                 self.excel.cell_set(ws_id=tab, row=2+top_row+r,
                             column=left_col+k, value=value, border=True)
+        #Adjust column widths if supplied
+        if column_widths:
+            self.excel.update_col_widths(tab=tab, widths=column_widths)
 
     def date_reformat(self,jdate):
         """Dates from Jira are strings such as '2016-03-11T15:32:28.000+0000'
@@ -861,81 +866,45 @@ if __name__=="__main__":
     #If connection successful, do stuff
     if go.jira:
 
-        #Get all bugs for Gold Build Project
-        go.get_project_issues(project='GB')
-        #Write "All Bugs"
-        #Write all to spreadsheet (defaults to all, so need for results argument)
-        go.report(top_row=3, left_col=1, tab="All GB Bugs", title="All Gold Build Bugs")
-        #Adjust widths
-        go.excel.update_col_widths(tab="All GB Bugs",widths=col_widths)
+        for pri, project in enumerate(["GB","K008","DEVTEST"]):
+            #Get all the bugs
+            go.get_project_issues(project=project)
 
-        #Write "Open Bugs"
-        #Find subset of results that are open
-        open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
-        #Write open bugs to spreadsheeet
-        go.report(results=open_bugs, top_row=3, left_col=1, tab="Open GB Bugs", title="Open Gold Build Bugs")
-        go.excel.update_col_widths(tab="Open GB Bugs", widths=col_widths)
+            #Write "All Bugs"
+            tab = "All "+project+" Bugs"
+            go.report(top_row=3, left_col=1, tab=tab, title=tab, column_widths=col_widths)
 
-        #Open bugs by application
-        #Find components aassociated with open bugs
-        components = [result["Components"]  for result in open_bugs]
-        components = list(set(components))#only want unique values
-        components.sort()
-        #Create sepearate table for each one
-        row_offset = 0
-        #Write results for each component
-        for component in components:
-            bugs = [result  for result in open_bugs if result["Components"]==component]
-            go.report(results=bugs, top_row=3+row_offset, left_col=1, tab="Open GB Bugs by Item", title="Open GB Bugs by Item")
-            row_offset = row_offset + len(bugs) +3
-        go.excel.update_col_widths(tab="Open GB Bugs by Item", widths=col_widths)
+            #Write "Open Bugs"
+            open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
+            tab = "Open "+project+"Bugs"
+            go.report(top_row=3, left_col=1, tab=tab, title=tab, column_widths=col_widths)
 
+            #Write Open bugs by application
+            # (Aside - add column widths setting to go.report()?)
 
-        #Get all bugs for project K0008
-        go.get_project_issues(project='K008')
-        #Write "All Bugs"
-        #Write all to spreadsheet (defaults to all, so need for results argument)
-        go.report(top_row=3, left_col=1, tab="All SB Bugs", title="All Silver Build Bugs")
-        #Adjust widths
-        go.excel.update_col_widths(tab="All SB Bugs",widths=col_widths)
+            #Open bugs by applications
+            #Find components aassociated with open bugs
+            components = [result["Components"]  for result in open_bugs]
+            components = list(set(components))#only want unique values
+            components.sort()
+            #
+            tab = "Open "+project+" Bugs by Item"
+            #Create sepearate table for each one
+            row_offset = 0
+            #Write results for each component
+            for component in components:
+                bugs = [result  for result in open_bugs if result["Components"]==component]
+                go.report(results=bugs, top_row=3+row_offset, left_col=1, tab=tab, title=tab, column_widths=col_widths)
+                row_offset = row_offset + len(bugs) +3
 
-        #Write "Open Bugs"
-        #Find subset of results that are open
-        open_bugs = [result  for result in go.extracted_results if result["Status"] in open_statuses]
-        #Write open bugs to spreadsheeet
-        go.report(results=open_bugs, top_row=3, left_col=1, tab="Open SB Bugs", title="Open Silver Build Bugs")
-        go.excel.update_col_widths(tab="Open SB Bugs", widths=col_widths)
-
-        #Open bugs by applications
-        #Find components aassociated with open bugs
-        components = [result["Components"]  for result in open_bugs]
-        components = list(set(components))#only want unique values
-        components.sort()
-        #Create sepearate table for each one
-        row_offset = 0
-        #Write results for each component
-        for component in components:
-            bugs = [result  for result in open_bugs if result["Components"]==component]
-            go.report(results=bugs, top_row=3+row_offset, left_col=1, tab="Open SB Bugs by Item", title="Open Bugs by Item")
-            row_offset = row_offset + len(bugs) +3
-        go.excel.update_col_widths(tab="Open SB Bugs by Item", widths=col_widths)
-
-        #Priority counts
-        go.excel.cell_set(ws_id='Info',row=2,column=4,value="K008")
-        go.excel.table_headings(tab="Info", row=3, column=4,headings=["Priority", "Count"])
-        for pi, priority in enumerate(["P1 V. High", "P2 High", "P3 Medium", "P4 Low", "P5 V. Low"]):
-            things = [result for result in open_bugs if result["Priority"]==priority]
-            count = len(things)
-            go.excel.cell_set(ws_id='Info',row=4+pi,column=4,border=True,value=priority)
-            go.excel.cell_set(ws_id='Info',row=4+pi,column=5,border=True,value=count)
-
-
-
-        #Add BAU bugs
-        go.get_project_issues(project='DEVTEST')
-        go.report(top_row=3, left_col=1, tab="Devtest", title="Devtest")
-        go.excel.update_col_widths(tab="Devtest", widths=col_widths)
-
+            #Priority counts
+            go.excel.cell_set(ws_id='Info',row=2,column=4+pri*3,value=project)
+            go.excel.table_headings(tab="Info", row=3, column=4+pri*3,headings=["Priority", "Count"])
+            for pi, priority in enumerate(["P1 V. High", "P2 High", "P3 Medium", "P4 Low", "P5 V. Low"]):
+                things = [result for result in open_bugs if result["Priority"]==priority]
+                count = len(things)
+                go.excel.cell_set(ws_id='Info',row=4+pi,column=4+pri*3,border=True,value=priority)
+                go.excel.cell_set(ws_id='Info',row=4+pi,column=5+pri*3,border=True,value=count)
 
         #Add some hyperlinks to Info tab
         go.excel.cell_set(ws_id="Info", row=1, column=1, value="Contents", bold=True)
